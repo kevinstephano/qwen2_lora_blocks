@@ -1,5 +1,5 @@
 from typing import Callable, List, Optional, Tuple, Union
-
+import copy
 import torch
 from torch import nn
 import json
@@ -21,8 +21,11 @@ from transformers.models.qwen2 import Qwen2ForCausalLM
 qwen2_cfg = config
 qwen2_cfg.batch_size = 1
 qwen2_cfg.seq_len = 4096
+qwen2_1layer_cfg = copy.deepcopy(qwen2_cfg)
+qwen2_1layer_cfg.num_hidden_layers = 1
 configs = {}
 configs[qwen2_cfg.name_or_path] = qwen2_cfg
+configs[qwen2_cfg.name_or_path + "_1layer"] = qwen2_1layer_cfg
 
 class MyModel(torch.nn.Module):
     def __init__(self, config):
