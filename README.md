@@ -13,6 +13,10 @@ python qwen2_lora_attn_block.py
 ```
 python qwen2_lora_mlp_block.py
 ```
+### Qwen2 Decoder Layer Block
+```
+python qwen2_lora_decoder_layer_block.py
+```
 
 ## Options
 * `--thunder_trace`: Dumps Forward and Backward Thunder traces.
