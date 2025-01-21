@@ -64,7 +64,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
     parser.add_argument('--warmup', default=5, type=int, help='Warmup iterations.')
     parser.add_argument('--iters', default=10, type=int, help='Timing iterations.')
     #parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["Torch-Eager", "torch.compile", "Thunder-torch.compile", "Thunder-Torch", "Thunder-nvFuser"], required=False)
-    parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["Torch-Eager", "torch.compile", "Thunder-nvFuser"], required=False)
+    parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["Torch-Eager", "torch.compile", "Thunder-default", "Thunder-nvFuser"], required=False)
     parser.add_argument('--thunder_trace', default=False, action="store_true", help='Prints a Thunder trace.')
     parser.add_argument('--nvfuser_repro', default=False, action="store_true", help='Prints an nvFuser reproduction script.')
     args,extra_args = parser.parse_known_args(args=sys_argv[1:])
@@ -82,10 +82,12 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
             executors["Thunder-Torch"] = partial(thunderfx, executors=["torch"])
         elif exec == "torch.compile":
             executors["torch.compile"] = partial(torch.compile)
+        elif exec == "Thunder-default":
+            executors["Thunder-default"] = partial(thunderfx)
         elif exec == "Thunder-nvFuser":
             executors["Thunder-nvFuser"] = partial(thunderfx, executors=["apex","cudnn","sdpa","nvfuser"])
         elif exec == "Thunder-torch.compile":
-            executors["Thunder-torch.compile"] = partial(thunderfx, executors=["torchcompile"])
+            executors["Thunder-torch.compile"] = partial(thunderfx, executors=["cudnn","torchcompile"])
         else:
             assert False, f"Unknown executor: {exec}"
 
@@ -93,7 +95,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
     for name, exec in executors.items():
         exec_model = exec(model)
 
-        if ((name == "Thunder-nvFuser") or (name == "Thunder-Torch") or (name == "Thunder-torch.compile")) and args.thunder_trace:
+        if ((name == "Thunder-default") or (name == "Thunder-nvFuser") or (name == "Thunder-Torch") or (name == "Thunder-torch.compile")) and args.thunder_trace:
             exec_model(**input_fn())
             backend = exec_model._backend
             print(name, "Forward:")
@@ -114,7 +116,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
 
         fd_fwd = {}
         fd_bwd = {}
-        if name == "Thunder-nvFuser" and args.nvfuser_repro:
+        if ((name == "Thunder-nvFuser") or (name == "Thunder-default")) and args.nvfuser_repro:
             exec_model(**input_fn())
             backend = exec_model._backend
             for subgraph_info in backend.subgraph_infos:
@@ -224,7 +226,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
             print("Model Exception!", e)
         torch.cuda.nvtx.range_pop()
 
-        if name == "Thunder-nvFuser" and args.nvfuser_repro:
+        if ((name == "Thunder-nvFuser") or (name == "Thunder-default")) and args.nvfuser_repro:
             for key in fd_fwd.keys():
                 print(f"nvfuser Forward Repro: {key}")
                 fd_fwd[key].last_used.execute(inputs=fd_fwd[key].last_inputs, print_repro=True)
