@@ -179,7 +179,6 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
         try:
             fwd_kernels, fwd_time, bwd_kernels, bwd_time = run_model()
         except Exception as e:
-            import pdb; pdb.set_trace()
             print("Model Exception!", e)
         torch.cuda.nvtx.range_pop()
 
