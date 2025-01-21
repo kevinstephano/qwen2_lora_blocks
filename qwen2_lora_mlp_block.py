@@ -72,9 +72,11 @@ class Qwen2MLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, x):
+    def forward(self, hidden_states: torch.Tensor):
+        x = hidden_states
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return down_proj
+        return (down_proj,)
+
 qwen2_cfg = Qwen2Config.from_dict(json.loads(qwen_cfg_str))
 qwen2_cfg.batch_size = 1
 qwen2_cfg.seq_len = 4096
@@ -84,16 +86,16 @@ configs[qwen2_cfg.name_or_path] = qwen2_cfg
 if __name__ == "__main__":
     for name,cfg in configs.items():
         def inputs():
-            x = torch.randn(cfg.batch_size, cfg.seq_len, cfg.hidden_size, device='cuda', dtype=torch.bfloat16, requires_grad=True)
-            return (x,)
+            hidden_states = torch.randn(cfg.batch_size, cfg.seq_len, cfg.hidden_size, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+            return {"hidden_states": hidden_states}
         def grads():
-            grad = torch.randn(cfg.batch_size * cfg.seq_len, cfg.hidden_size, device='cuda', dtype=torch.bfloat16, requires_grad=False)
+            grad = torch.randn(cfg.batch_size, cfg.seq_len, cfg.hidden_size, device='cuda', dtype=torch.bfloat16, requires_grad=False)
             return grad
 
         model = Qwen2MLP(cfg)
         for module in model.modules():
             if isinstance(module, nn.Linear):
-                module = patch_linear_module(module)
+                module = patch_linear_module(module, dropout=0)
         model = model.cuda().bfloat16()
         #print(model)
-        runner.run(sys.argv, name, cfg.batch_size, cfg.seq_len, model, inputs, grads)
+        runner.run(sys.argv, name, cfg.batch_size, cfg.seq_len, model, inputs, False, grads)

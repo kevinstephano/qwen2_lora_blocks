@@ -4,6 +4,7 @@ from functools import partial, wraps
 import subprocess
 import sys
 import thunder
+from thunder.dynamo import thunderfx
 import torch
 from torch.profiler import profile, ProfilerActivity
 from typing import Callable
@@ -29,7 +30,7 @@ def install_pandas():
             print("pip install pandas")
             return None
 
-def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad_fn) : 
+def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, model_has_loss=False, grad_fn=None) : 
     pd = install_pandas()
     assert pd is not None
     pd.options.display.max_colwidth=100
@@ -40,7 +41,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad
     parser.add_argument('--warmup', default=5, type=int, help='Warmup iterations.')
     parser.add_argument('--iters', default=10, type=int, help='Timing iterations.')
     #parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["Torch-Eager", "torch.compile", "Thunder-torch.compile", "Thunder-Torch", "Thunder-nvFuser"], required=False)
-    parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["torch.compile", "Thunder-nvFuser"], required=False)
+    parser.add_argument('--execs', nargs='+', type=str, help='List of executor names to time.', default=["Torch-Eager", "torch.compile", "Thunder-nvFuser"], required=False)
     parser.add_argument('--thunder_trace', default=False, action="store_true", help='Prints a Thunder trace.')
     parser.add_argument('--nvfuser_repro', default=False, action="store_true", help='Prints an nvFuser reproduction script.')
     args,extra_args = parser.parse_known_args(args=sys_argv[1:])
@@ -59,7 +60,8 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad
         elif exec == "torch.compile":
             executors["torch.compile"] = partial(torch.compile)
         elif exec == "Thunder-nvFuser":
-            executors["Thunder-nvFuser"] = partial(thunder.jit, executors=["apex","cudnn","sdpa","nvfuser"])
+            executors["Thunder-nvFuser"] = partial(thunderfx, executors=["apex","cudnn","sdpa","nvfuser"])
+            #executors["Thunder-nvFuser"] = partial(thunderfx)
         elif exec == "Thunder-torch.compile":
             executors["Thunder-torch.compile"] = partial(thunder.jit, executors=["torchcompile"])
         else:
@@ -94,7 +96,7 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad
 
         def model_iter():
             torch.cuda.nvtx.range_push("Inputs Generation")
-            input_tuple = input_fn()
+            input_dict = input_fn()
             torch.cuda.nvtx.range_pop()
             
             torch.cuda.nvtx.range_push("Forward")
@@ -102,43 +104,51 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad
             fwd_kernels = 0
             if not args.nsys:
                 with profile(activities=[ProfilerActivity.CUDA]) as prof: 
-                    y = exec_model(*input_tuple)
+                    y = exec_model(**input_dict)
 
                 for evt in prof.events():
                     if evt.device_time > 0.0:
                         fwd_kernels += 1
                     fwd_time += evt.device_time
             else:
-                y = exec_model(*input_tuple)
+                y = exec_model(**input_dict)
             torch.cuda.nvtx.range_pop()
-            
-            torch.cuda.nvtx.range_push("Forward-Loss")
-            for idx in range(0, len(y)):
-                if idx == 0:
-                    loss = y[0]
+           
+            if model_has_loss or grad_fn is not None:
+                torch.cuda.nvtx.range_push("Forward-Loss")
+                for idx in range(0, len(y)):
+                    if idx == 0:
+                        loss = y[0]
+                    else:
+                        loss += y[idx]
+                torch.cuda.nvtx.range_pop()
+
+                torch.cuda.nvtx.range_push("Grad Generation")
+                for param in exec_model.parameters():
+                    param.grad = None
+                if not model_has_loss and grad_fn is not None:
+                    grads = grad_fn()
+                torch.cuda.nvtx.range_pop()
+
+                torch.cuda.nvtx.range_push("Backward")
+                bwd_time = 0.0
+                bwd_kernels = 0
+                if not args.nsys:
+                    with profile(activities=[ProfilerActivity.CUDA]) as prof: 
+                        if model_has_loss:
+                            loss.backward()
+                        else:
+                            loss.backward(grads)
+                    for evt in prof.events():
+                        if evt.device_time > 0.0:
+                            bwd_kernels += 1
+                        bwd_time += evt.device_time
                 else:
-                    loss += y[idx]
-            torch.cuda.nvtx.range_pop()
-
-            torch.cuda.nvtx.range_push("Grad Generation")
-            for param in exec_model.parameters():
-                param.grad = None
-            grads = grad_fn()
-            torch.cuda.nvtx.range_pop()
-
-            torch.cuda.nvtx.range_push("Backward")
-            bwd_time = 0.0
-            bwd_kernels = 0
-            if not args.nsys:
-                with profile(activities=[ProfilerActivity.CUDA]) as prof: 
-                    loss.backward(grads)
-                for evt in prof.events():
-                    if evt.device_time > 0.0:
-                        bwd_kernels += 1
-                    bwd_time += evt.device_time
-            else:
-                loss.backward(grads)
-            torch.cuda.nvtx.range_pop()
+                    if model_has_loss:
+                        loss.backward()
+                    else:
+                        loss.backward(grads)
+                torch.cuda.nvtx.range_pop()
 
             return fwd_kernels, fwd_time, bwd_kernels, bwd_time
 
@@ -169,7 +179,8 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, grad
         try:
             fwd_kernels, fwd_time, bwd_kernels, bwd_time = run_model()
         except Exception as e:
-            print(e)
+            import pdb; pdb.set_trace()
+            print("Model Exception!", e)
         torch.cuda.nvtx.range_pop()
 
         if name == "Thunder-nvFuser" and args.nvfuser_repro:
