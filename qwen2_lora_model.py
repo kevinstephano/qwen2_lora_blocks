@@ -1,23 +1,15 @@
-from typing import Callable, List, Optional, Tuple, Union
 import copy
 import torch
 from torch import nn
-import json
 import sys
-import torch
-from collections import OrderedDict
-from torch import nn
-from nemo.collections.llm.peft.lora import patch_linear_module
-from transformers.models.qwen2 import Qwen2Config
 from utils import runner
 
-# Example to download model and config
-from transformers import AutoConfig, AutoModel
-#qwen2_model = AutoModel.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
-config = AutoConfig.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+from nemo.collections.llm.peft.lora import patch_linear_module
+from transformers import AutoConfig
 from transformers.models.qwen2 import Qwen2ForCausalLM
 
-#qwen2_cfg = Qwen2Config.from_dict(json.loads(qwen_cfg_str))
+config = AutoConfig.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+
 qwen2_cfg = config
 qwen2_cfg.batch_size = 1
 qwen2_cfg.seq_len = 4096
@@ -36,7 +28,7 @@ class MyModel(torch.nn.Module):
     def forward(
         self,
         input_ids: torch.LongTensor,
-        labels: Optional[torch.LongTensor],
+        labels: torch.LongTensor,
         ) :
         out = self.model(input_ids=input_ids, labels=labels)
         assert out.loss is not None, "Loss is none?"

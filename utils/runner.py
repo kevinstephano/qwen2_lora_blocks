@@ -30,9 +30,32 @@ def install_pandas():
             print("pip install pandas")
             return None
 
+def install_transformers():
+    """
+    Check if transformers is installed, and if not, install it using pip.
+    Returns True if pandas is successfully installed or already present,
+    False if installation fails.
+    """
+    try:
+        import transformers as xfs
+        return xfs
+    except ImportError:
+        print("HuggingFace Transformers is not installed. Installing now...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "transformers"])
+            print("transformerss has been successfully installed!")
+            import transformers as xfs
+            return xfs
+        except subprocess.CalledProcessError:
+            print("Failed to install transformers. Please try installing manually using:")
+            print("pip install transformers")
+            return None
+
 def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, model_has_loss=False, grad_fn=None) : 
     pd = install_pandas()
-    assert pd is not None
+    assert pd is not None, "Pandas is not installed!"
+    xfs = install_transformers()
+    assert xfs is not None, "Transformers is not installed!" 
     pd.options.display.max_colwidth=100
     pd.options.display.float_format = '{:.3f}'.format
 
@@ -56,14 +79,13 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
         if exec == "Torch-Eager":
             executors["Torch-Eager"] = eager_wrapper
         elif exec == "Thunder-Torch":
-            executors["Thunder-Torch"] = partial(thunder.jit, executors=["torch"])
+            executors["Thunder-Torch"] = partial(thunderfx, executors=["torch"])
         elif exec == "torch.compile":
             executors["torch.compile"] = partial(torch.compile)
         elif exec == "Thunder-nvFuser":
             executors["Thunder-nvFuser"] = partial(thunderfx, executors=["apex","cudnn","sdpa","nvfuser"])
-            #executors["Thunder-nvFuser"] = partial(thunderfx)
         elif exec == "Thunder-torch.compile":
-            executors["Thunder-torch.compile"] = partial(thunder.jit, executors=["torchcompile"])
+            executors["Thunder-torch.compile"] = partial(thunderfx, executors=["torchcompile"])
         else:
             assert False, f"Unknown executor: {exec}"
 
@@ -72,27 +94,47 @@ def run(sys_argv, model_name, batch_size, sequence_length, model, input_fn, mode
         exec_model = exec(model)
 
         if ((name == "Thunder-nvFuser") or (name == "Thunder-Torch") or (name == "Thunder-torch.compile")) and args.thunder_trace:
-            exec_model(*input_fn())
+            exec_model(**input_fn())
+            backend = exec_model._backend
             print(name, "Forward:")
-            fwd_trace = thunder.last_traces(exec_model)[-1]
-            print(fwd_trace)
 
-            print(name, "Backward:")
-            bwd_trace = thunder.last_backward_traces(exec_model)[-1]
-            print(bwd_trace)
+            for subgraph_info in backend.subgraph_infos:
+                assert isinstance(subgraph_info.original_graph_module, torch.fx.GraphModule)
+                assert len(subgraph_info.thunder_compiled_fns)  # There was atleast one function compiled with thunder.
+                for thunder_fn in subgraph_info.thunder_compiled_fns:
+                    print(thunder.last_traces(thunder_fn)[-1])
+
+            if model_has_loss or grad_fn is not None:
+                print(name, "Backward:")
+                for subgraph_info in backend.subgraph_infos:
+                    assert isinstance(subgraph_info.original_graph_module, torch.fx.GraphModule)
+                    assert len(subgraph_info.thunder_compiled_fns)  # There was atleast one function compiled with thunder.
+                    for thunder_fn in subgraph_info.thunder_compiled_fns:
+                        print(thunder.last_backward_traces(thunder_fn)[-1])
 
         fd_fwd = {}
         fd_bwd = {}
         if name == "Thunder-nvFuser" and args.nvfuser_repro:
-            exec_model(*input_fn())
-            for key in thunder.last_traces(exec_model)[-1].python_ctx().keys():
-                if key[0:8] == "nvFusion":
-                    fd_fwd[key] = thunder.last_traces(exec_model)[-1].python_ctx()[key]
-                    fd_fwd[key].store_inputs = True
-            for key in thunder.last_backward_traces(exec_model)[-1].python_ctx().keys():
-                if key[0:8] == "nvFusion":
-                    fd_bwd[key] = thunder.last_backward_traces(exec_model)[-1].python_ctx()[key]
-                    fd_bwd[key].store_inputs = True
+            exec_model(**input_fn())
+            backend = exec_model._backend
+            for subgraph_info in backend.subgraph_infos:
+                assert isinstance(subgraph_info.original_graph_module, torch.fx.GraphModule)
+                assert len(subgraph_info.thunder_compiled_fns)  # There was atleast one function compiled with thunder.
+                for thunder_fn in subgraph_info.thunder_compiled_fns:
+                    for key in thunder.last_traces(thunder_fn)[-1].python_ctx().keys():
+                        if key[0:8] == "nvFusion":
+                            fd_fwd[key] = thunder.last_traces(thunder_fn)[-1].python_ctx()[key]
+                            fd_fwd[key].store_inputs = True
+
+            if model_has_loss or grad_fn is not None:
+                for subgraph_info in backend.subgraph_infos:
+                    assert isinstance(subgraph_info.original_graph_module, torch.fx.GraphModule)
+                    assert len(subgraph_info.thunder_compiled_fns)  # There was atleast one function compiled with thunder.
+                    for thunder_fn in subgraph_info.thunder_compiled_fns:
+                        for key in thunder.last_backward_traces(thunder_fn)[-1].python_ctx().keys():
+                            if key[0:8] == "nvFusion":
+                                fd_bwd[key] = thunder.last_backward_traces(thunder_fn)[-1].python_ctx()[key]
+                                fd_bwd[key].store_inputs = True
 
         def model_iter():
             torch.cuda.nvtx.range_push("Inputs Generation")

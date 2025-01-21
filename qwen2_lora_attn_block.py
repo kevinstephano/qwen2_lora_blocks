@@ -1,21 +1,15 @@
-from typing import Callable, List, Optional, Tuple, Union
 import torch
 from torch import nn
 import sys
-import torch
-from collections import OrderedDict
-from torch import nn
-from nemo.collections.llm.peft.lora import patch_linear_module
-from transformers.models.qwen2 import Qwen2Config
-from transformers.models.qwen2.modeling_qwen2 import Qwen2Attention
-from transformers.cache_utils import DynamicCache
 from utils import runner
 
-# Example to download model and config
-from transformers import AutoConfig, AutoModel
-#qwen2_model = AutoModel.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+from nemo.collections.llm.peft.lora import patch_linear_module
+from transformers import AutoConfig
+from transformers.cache_utils import DynamicCache
+from transformers.models.qwen2.modeling_qwen2 import Qwen2Attention
+from transformers.cache_utils import DynamicCache
+
 config = AutoConfig.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
-from transformers.models.qwen2 import Qwen2ForCausalLM
 
 qwen2_cfg = config
 qwen2_cfg.batch_size = 1

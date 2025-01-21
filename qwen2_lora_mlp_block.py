@@ -1,18 +1,13 @@
-import json
-import sys
-import torch
 from collections import OrderedDict
+import torch
 from torch import nn
-from nemo.collections.llm.peft.lora import patch_linear_module
-from transformers.models.qwen2 import Qwen2Config
+import sys
 from utils import runner
 
-'''
-# Example to download model and config
-from transformers import AutoConfig, AutoModel
-model = AutoModel.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+from nemo.collections.llm.peft.lora import patch_linear_module
+from transformers import AutoConfig
+
 config = AutoConfig.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
-'''
 
 qwen_cfg_str = r'''{
   "_name_or_path": "Qwen/Qwen2.5-7B-Instruct",
@@ -77,7 +72,7 @@ class Qwen2MLP(nn.Module):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return (down_proj,)
 
-qwen2_cfg = Qwen2Config.from_dict(json.loads(qwen_cfg_str))
+qwen2_cfg = config
 qwen2_cfg.batch_size = 1
 qwen2_cfg.seq_len = 4096
 configs = {}
