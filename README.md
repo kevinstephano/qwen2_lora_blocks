@@ -15,5 +15,7 @@ python qwen2_lora_mlp_block.py
 ```
 
 ## Options
-* `--thunder_trace`: Dumps Forward and Backward Thunder traces
+* `--thunder_trace`: Dumps Forward and Backward Thunder traces.
+* `--nvfuser_repro`: Dumps nvFuser python script repros.
+* `--nsys`: Turns of torch.profiler usage to allow for NSight Systems profiling.
 * `--execs`: Allows you to specify a single executor to rerun like "Thunder-nvFuser". 
