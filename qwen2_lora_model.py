@@ -21,6 +21,7 @@ from transformers.models.qwen2 import Qwen2ForCausalLM
 qwen2_cfg = config
 qwen2_cfg.batch_size = 1
 qwen2_cfg.seq_len = 4096
+qwen2_cfg._attn_implementation = "sdpa"
 qwen2_1layer_cfg = copy.deepcopy(qwen2_cfg)
 qwen2_1layer_cfg.num_hidden_layers = 1
 configs = {}
